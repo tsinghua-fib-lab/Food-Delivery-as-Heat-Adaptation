@@ -1,0 +1,480 @@
+---
+title: "All Figures"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(lfe)
+library(forcats)
+library(data.table)
+library(dplyr)
+library(plyr)
+library(stringr)
+library(ggplot2)
+library(viridis)
+library(stargazer)
+require(stats)
+library(fixest)
+library(sf)
+record_results <- function(felm.est, fname){
+  # save regression summary
+  dir.name <- "R_results/"
+  tex.fname <- paste0(fname, "_summary.tex")
+  invisible(stargazer(felm.est, title = "Regression Results", align = TRUE, out = paste0(dir.name, tex.fname)))
+  html.fname <- paste0(fname, "_summary.html")
+  invisible(stargazer(felm.est, title = "Regression Results", out = paste0(dir.name, html.fname)))
+  txt.fname <- paste0(fname, "_summary.txt")
+  sink(paste0(dir.name, txt.fname))
+  print(summary(felm.est))
+  sink()
+  
+  # save regression coefficients and confidential intervals
+  coefficients <- coef(summary(felm.est))
+  coefficients <- as.data.frame(coefficients)
+  setnames(coefficients, c("coef", "se", "t", "p"))
+  coef_intervals <- confint(felm.est, level = 0.95)
+  coef_intervals <- as.data.frame(coef_intervals)
+  setnames(coef_intervals, c("conf_int_l", "conf_int_u"))
+  combined_df <- cbind(coefficients, coef_intervals)
+  output_file <- paste0(dir.name, fname, ".csv")
+  write.csv(combined_df, file = output_file, row.names = TRUE)
+}
+
+
+record_results_fixest <- function(felm.est, fname){
+  dir.name <- "R_results/"
+  txt.fname <- paste0(fname, "_summary.txt")
+  sink(paste0(dir.name, txt.fname))
+  print(summary(felm.est))
+  sink()
+
+  coefficients <- coef(summary(felm.est))
+  coefficients <- as.data.frame(coefficients)
+  setnames(coefficients, c("coef"))
+  ses <- se(summary(felm.est))
+  ses <- as.data.frame(ses)
+  setnames(ses, c("se"))
+  ps <- pvalue(summary(felm.est))
+  ps <- as.data.frame(ps)
+  setnames(ps, c("p"))
+  coef_intervals <- confint(felm.est, level = 0.95)
+  coef_intervals <- as.data.frame(coef_intervals)
+  setnames(coef_intervals, c("conf_int_l", "conf_int_u"))
+  combined_df <- cbind(coefficients, ses, ps, coef_intervals)
+  output_file <- paste0(dir.name, fname, ".csv")
+  write.csv(combined_df, file = output_file, row.names = TRUE)
+}
+```
+
+## Figure 1
+
+```{r}
+# data preparation
+city_count <- read.csv("city_order_ranking.csv", header = TRUE, row.names = NULL, encoding = 'gbk')
+city.panel <- read.csv("daily_city_2017_2023.csv", header = TRUE, row.names = NULL, encoding = 'gbk')
+city.panel$weekday <- as.factor(city.panel$weekday)
+city.panel$log_cnt <- log1p(city.panel$order_cnt) # logarithm of all-day order volume
+city.panel$log_noon_cnt <- log1p(city.panel$noon_order_cnt) # lunchtime order
+city.panel$log_evening_cnt <- log1p(city.panel$evening_order_cnt) # dinnertime order
+city.panel$log_avg_noon_delivery <- log1p(city.panel$noon_delivery_fee / city.panel$order_cnt)
+city.panel$is_holiday <- as.factor(city.panel$is_holiday) # holiday dummy
+city.panel$is_chunjie <- as.factor(city.panel$is_chunjie) # spring festival dummy
+city.panel$year <- as.integer(substr(city.panel$buy_date, 1, 4))
+city.panel$month <- as.factor(city.panel$month)
+city.panel$month1 <- as.integer(substr(city.panel$buy_date, 6, 7))
+city.panel$cut_precp <- cut(city.panel$prec, breaks=c(-Inf, 0.1, 10, 25, 50, Inf)) # precipitation variable
+city.panel$cut_humid <- cut(city.panel$rhu, breaks=c(-Inf, 10, 20, 30, 40, 50, 60, 70, 80, 90, Inf)) # humidity variable
+breaks <- c(-Inf,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40, Inf)
+city.panel$cut_maxtemp <- cut(city.panel$max_temp, breaks=breaks)
+city.panel$cut_maxtemp <- fct_relevel(city.panel$cut_maxtemp, "(19,20]") # maximum temperature variable
+```
+
+```{r}
+## Fig.1a
+city.panel.2019 <- city.panel[city.panel$year %in% c(2017,2018,2019,2023), ] # extract 4 year records
+city.panel.2019 <- city.panel.2019 %>% filter(city.panel.2019$city_name %in% head(city_count$city_name, 101))
+city.panel.2019 <- city.panel.2019[city.panel.2019$city_name != '香港特别行政区', ] # top 100 cities
+city.panel.2019 <- as.data.table(city.panel.2019)
+tmax.fe <- felm(log_cnt ~ cut_maxtemp + cut_precp + cut_humid + wind_speed |
+                  city_name + buy_date | 0 | city_name + buy_date
+                , data=city.panel.2019, exactDOF=TRUE, psdef=FALSE)
+record_results(tmax.fe, 'city_4year_040_cnt')
+tmax.fe <- felm(log_noon_cnt ~ cut_maxtemp + cut_precp + cut_humid + wind_speed |
+                  city_name + buy_date | 0 | city_name + buy_date
+                , data=city.panel.2019, exactDOF=TRUE, psdef=FALSE)
+record_results(tmax.fe, 'city_4year_040_noon_cnt')
+tmax.fe <- felm(log_evening_cnt ~ cut_maxtemp + cut_precp + cut_humid + wind_speed |
+                  city_name + buy_date | 0 | city_name + buy_date
+                , data=city.panel.2019, exactDOF=TRUE, psdef=FALSE)
+record_results(tmax.fe, 'city_4year_040_evening_cnt')
+# Fig.2d
+tmax.fe <- felm(log_avg_noon_delivery ~ cut_maxtemp + cut_precp + cut_humid + wind_speed |
+                  city_name + buy_date | 0 | city_name + buy_date
+                , data=city.panel.2019, exactDOF=TRUE, psdef=FALSE)
+record_results(tmax.fe, 'city_4year_040_noon_delivery')
+```
+
+
+```{r}
+## Fig.1c, by year
+for (year in c(17,18,19,23)){
+  city.panel.2019 <- city.panel[city.panel$year == 2000+year, ]
+  city.panel.2019 <- city.panel.2019 %>% filter(city.panel.2019$city_name %in% head(city_count$city_name, 101))
+  city.panel.2019 <- city.panel.2019[city.panel.2019$city_name != '香港特别行政区', ]
+  city.panel.2019 <- as.data.table(city.panel.2019)
+  tmax.fe <- felm(log_cnt ~ cut_maxtemp + cut_precp+ cut_humid + wind_speed |
+                    city_name + buy_date | 0 | city_name + buy_date
+                  , data=city.panel.2019, exactDOF=TRUE, psdef=FALSE)
+  record_results(tmax.fe, paste0('city_',year,'_040_cnt'))
+  tmax.fe <- felm(log_noon_cnt ~ cut_maxtemp + cut_precp+ cut_humid + wind_speed |
+                    city_name + buy_date | 0 | city_name + buy_date
+                  , data=city.panel.2019, exactDOF=TRUE, psdef=FALSE)
+  record_results(tmax.fe, paste0('city_',year,'_040_noon_cnt'))
+  tmax.fe <- felm(log_evening_cnt ~ cut_maxtemp + cut_precp+ cut_humid + wind_speed |
+                    city_name + buy_date | 0 | city_name + buy_date
+                  , data=city.panel.2019, exactDOF=TRUE, psdef=FALSE)
+  record_results(tmax.fe, paste0('city_',year,'_040_evening_cnt'))
+}
+```
+
+
+```{r}
+# #Fig.1b & Fig.2e, neighbourhood-level
+geohash.panel <- read.csv("daily_geohash5_2017_2023.csv", header = TRUE, row.names = NULL, encoding = 'gbk')
+geohash.panel$weekday <- as.factor(geohash.panel$weekday)
+geohash.panel$is_holiday <- as.factor(geohash.panel$is_holiday)
+geohash.panel$is_chunjie <- as.factor(geohash.panel$is_chunjie)
+geohash.panel$cut_precp <- cut(geohash.panel$prec, breaks=c(-Inf, 0.1, 10, 25, 50, Inf))
+geohash.panel$cut_humid <- cut(geohash.panel$rhu, breaks=c(-Inf, 10, 20, 30, 40, 50, 60, 70, 80, 90, Inf))
+geohash.panel$log_cnt <- log1p(geohash.panel$order_cnt)
+geohash.panel$log_noon_cnt <- log1p(geohash.panel$noon_order_cnt)
+geohash.panel$log_evening_cnt <- log1p(geohash.panel$evening_order_cnt)
+geohash.panel$log_avg_noon_delivery <- log1p(geohash.panel$noon_delivery_fee / geohash.panel$order_cnt)
+geohash.panel$month <- as.factor(geohash.panel$month)
+geohash.panel$buy_date <- as.factor(geohash.panel$buy_date)
+geohash.panel$year <- as.integer(substr(geohash.panel$buy_date, 1, 4))
+geohash.panel.top50 <- geohash.panel[geohash.panel$year %in% c(2017, 2018, 2019, 2023), ]
+geohash.panel.top50 <- geohash.panel.top50 %>% filter(geohash.panel.top50$city_name %in% head(city_count$city_name, 101))
+geohash.panel.top50 <- geohash.panel.top50[geohash.panel.top50$city_name != '香港特别行政区', ]
+geohash.panel.top50$city_name <- as.factor(geohash.panel.top50$city_name)
+geohash.panel.top50$geohash5 <- as.factor(geohash.panel.top50$geohash5)
+geohash.panel.top50 <- as.data.table(geohash.panel.top50)
+breaks <- c(-Inf, 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40, Inf)
+geohash.panel.top50$cut_maxtemp <- cut(geohash.panel.top50$max_temp, breaks=breaks)
+geohash.panel.top50$cut_maxtemp <- fct_relevel(geohash.panel.top50$cut_maxtemp, "(19,20]")
+
+tmax.fe <- felm(log_cnt ~ cut_maxtemp + cut_precp + cut_humid + wind_speed + is_holiday + is_chunjie + weekday |
+                  geohash5 + city_name:month | 0 | geohash5 + buy_date, 
+                data=geohash.panel.top50, exactDOF=TRUE, psdef=FALSE)
+record_results(tmax.fe, 'neighbour_4year_040_cnt')
+tmax.fe <- felm(log_noon_cnt ~ cut_maxtemp + cut_precp + cut_humid + wind_speed + is_holiday + is_chunjie + weekday |
+                  geohash5 + city_name:month | 0 | geohash5 + buy_date, 
+                data=geohash.panel.top50, exactDOF=TRUE, psdef=FALSE)
+record_results(tmax.fe, 'neighbour_4year_040_noon_cnt')
+tmax.fe <- felm(log_evening_cnt ~ cut_maxtemp + cut_precp + cut_humid + wind_speed + is_holiday + is_chunjie + weekday |
+                  geohash5 + city_name:month | 0 | geohash5 + buy_date, 
+                data=geohash.panel.top50, exactDOF=TRUE, psdef=FALSE)
+record_results(tmax.fe, 'neighbour_4year_040_evening_cnt')
+tmax.fe <- felm(log_avg_noon_delivery ~ cut_maxtemp + cut_precp + cut_humid + wind_speed + is_holiday + is_chunjie + weekday |
+                  geohash5 + city_name:month | 0 | geohash5 + buy_date, 
+                data=geohash.panel.top50, exactDOF=TRUE, psdef=FALSE)
+record_results(tmax.fe, 'geohash_top100_4year_040_noon_delivery_new')
+```
+
+## Figure 2
+
+```{r}
+# female
+city.panel.midlow <- read.csv("daily_city_noon_gender_F.csv", header = TRUE, row.names = NULL, encoding = 'gbk')
+city.panel.midlow$weekday <- as.factor(city.panel.midlow$weekday)
+city.panel.midlow$log_cnt <- log1p(city.panel.midlow$order_cnt)
+city.panel.midlow$log_avg_amt <- log1p(city.panel.midlow$total_amount / city.panel.midlow$order_cnt)
+city.panel.midlow$log_avg_delivery <- log1p(city.panel.midlow$total_delivery_fee / city.panel.midlow$order_cnt)
+city.panel.midlow$is_holiday <- as.factor(city.panel.midlow$is_holiday)
+city.panel.midlow$is_chunjie <- as.factor(city.panel.midlow$is_chunjie)
+city.panel.midlow$year <- as.integer(substr(city.panel.midlow$buy_date, 1, 4))
+city.panel.midlow$month <- as.factor(city.panel.midlow$month)
+city.panel.midlow$month1 <- as.integer(substr(city.panel.midlow$buy_date, 6, 7))
+city.panel.midlow$cut_precp <- cut(city.panel.midlow$prec, breaks=c(-Inf, 0.1, 10, 25, 50, Inf))
+city.panel.midlow$cut_humid <- cut(city.panel.midlow$rhu, breaks=c(-Inf, 10, 20, 30, 40, 50, 60, 70, 80, 90, Inf))
+for (year in c(17, 18, 19, 23)){
+  city.panel.2019 <- city.panel.midlow[city.panel.midlow$year == 2000+year, ]
+  city.panel.2019 <- city.panel.2019 %>% filter(city.panel.2019$city_name %in% head(city_count$city_name, 101))
+  city.panel.2019 <- city.panel.2019[city.panel.2019$city_name != '香港特别行政区', ]
+  city.panel.2019 <- as.data.table(city.panel.2019)
+  
+  breaks <- c(-Inf, 0, 5, 10, 15, 20, 25, 30, 35, Inf)
+  city.panel.2019$cut_maxtemp <- cut(city.panel.2019$max_temp, breaks=breaks)
+  city.panel.2019$cut_maxtemp <- fct_relevel(city.panel.2019$cut_maxtemp, "(15,20]") # cut into 5C bins
+  tmax.fe <- felm(log_cnt ~ cut_maxtemp + cut_precp  + cut_humid + wind_speed | city_name + buy_date | 0 | city_name + buy_date, data=city.panel.2019, exactDOF=TRUE, psdef=FALSE)
+  record_results(tmax.fe, paste0('city_', year, '_bin5_noon_cnt_female'))
+}
+# male
+city.panel.midlow <- read.csv("daily_city_noon_gender_M.csv", header = TRUE, row.names = NULL, encoding = 'gbk')
+city.panel.midlow$weekday <- as.factor(city.panel.midlow$weekday)
+city.panel.midlow$log_cnt <- log1p(city.panel.midlow$order_cnt)
+city.panel.midlow$log_avg_amt <- log1p(city.panel.midlow$total_amount / city.panel.midlow$order_cnt)
+city.panel.midlow$log_avg_delivery <- log1p(city.panel.midlow$total_delivery_fee / city.panel.midlow$order_cnt)
+city.panel.midlow$is_holiday <- as.factor(city.panel.midlow$is_holiday)
+city.panel.midlow$is_chunjie <- as.factor(city.panel.midlow$is_chunjie)
+city.panel.midlow$year <- as.integer(substr(city.panel.midlow$buy_date, 1, 4))
+city.panel.midlow$month <- as.factor(city.panel.midlow$month)
+city.panel.midlow$month1 <- as.integer(substr(city.panel.midlow$buy_date, 6, 7))
+city.panel.midlow$cut_precp <- cut(city.panel.midlow$prec, breaks=c(-Inf, 0.1, 10, 25, 50, Inf))
+city.panel.midlow$cut_humid <- cut(city.panel.midlow$rhu, breaks=c(-Inf, 10, 20, 30, 40, 50, 60, 70, 80, 90, Inf))
+for (year in c(17, 18, 19, 23)){
+  city.panel.2019 <- city.panel.midlow[city.panel.midlow$year == 2000+year, ]
+  city.panel.2019 <- city.panel.2019 %>% filter(city.panel.2019$city_name %in% head(city_count$city_name, 101))
+  city.panel.2019 <- city.panel.2019[city.panel.2019$city_name != '香港特别行政区', ]
+  city.panel.2019 <- as.data.table(city.panel.2019)
+  
+  breaks <- c(-Inf, 0, 5, 10, 15, 20, 25, 30, 35, Inf)
+  city.panel.2019$cut_maxtemp <- cut(city.panel.2019$max_temp, breaks=breaks)
+  city.panel.2019$cut_maxtemp <- fct_relevel(city.panel.2019$cut_maxtemp, "(15,20]")
+  tmax.fe <- felm(log_cnt ~ cut_maxtemp + cut_precp  + cut_humid + wind_speed | city_name + buy_date | 0 | city_name + buy_date, data=city.panel.2019, exactDOF=TRUE, psdef=FALSE)
+  record_results(tmax.fe, paste0('city_', year, '_bin5_noon_cnt_male'))
+}
+# low-income
+city.panel.midlow <- read.csv("daily_city_noon_salary_Low.csv", header = TRUE, row.names = NULL, encoding = 'gbk')
+city.panel.midlow$weekday <- as.factor(city.panel.midlow$weekday)
+city.panel.midlow$log_cnt <- log1p(city.panel.midlow$order_cnt)
+city.panel.midlow$log_avg_amt <- log1p(city.panel.midlow$total_amount / city.panel.midlow$order_cnt)
+city.panel.midlow$log_avg_delivery <- log1p(city.panel.midlow$total_delivery_fee / city.panel.midlow$order_cnt)
+city.panel.midlow$is_holiday <- as.factor(city.panel.midlow$is_holiday)
+city.panel.midlow$is_chunjie <- as.factor(city.panel.midlow$is_chunjie)
+city.panel.midlow$year <- as.integer(substr(city.panel.midlow$buy_date, 1, 4))
+city.panel.midlow$month <- as.factor(city.panel.midlow$month)
+city.panel.midlow$month1 <- as.integer(substr(city.panel.midlow$buy_date, 6, 7))
+city.panel.midlow$cut_precp <- cut(city.panel.midlow$prec, breaks=c(-Inf, 0.1, 10, 25, 50, Inf))
+city.panel.midlow$cut_humid <- cut(city.panel.midlow$rhu, breaks=c(-Inf, 10, 20, 30, 40, 50, 60, 70, 80, 90, Inf))
+for (year in c(17, 18, 19, 23)){
+  city.panel.2019 <- city.panel.midlow[city.panel.midlow$year == 2000+year, ]
+  city.panel.2019 <- city.panel.2019 %>% filter(city.panel.2019$city_name %in% head(city_count$city_name, 101))
+  city.panel.2019 <- city.panel.2019[city.panel.2019$city_name != '香港特别行政区', ]
+  city.panel.2019 <- as.data.table(city.panel.2019)
+  
+  breaks <- c(-Inf, 0, 5, 10, 15, 20, 25, 30, 35, Inf)
+  city.panel.2019$cut_maxtemp <- cut(city.panel.2019$max_temp, breaks=breaks)
+  city.panel.2019$cut_maxtemp <- fct_relevel(city.panel.2019$cut_maxtemp, "(15,20]")
+  tmax.fe <- felm(log_cnt ~ cut_maxtemp + cut_precp  + cut_humid + wind_speed | city_name + buy_date | 0 | city_name + buy_date, data=city.panel.2019, exactDOF=TRUE, psdef=FALSE)
+  record_results(tmax.fe, paste0('city_', year, '_bin5_noon_cnt_lowincome'))
+}
+# high-income
+city.panel.high <- read.csv("daily_city_noon_salary_High.csv", header = TRUE, row.names = NULL, encoding = 'gbk')
+city.panel.high$weekday <- as.factor(city.panel.high$weekday)
+city.panel.high$log_cnt <- log1p(city.panel.high$order_cnt)
+city.panel.high$log_avg_amt <- log1p(city.panel.high$total_amount / city.panel.high$order_cnt)
+city.panel.high$log_avg_delivery <- log1p(city.panel.high$total_delivery_fee / city.panel.high$order_cnt)
+city.panel.high$is_holiday <- as.factor(city.panel.high$is_holiday)
+city.panel.high$is_chunjie <- as.factor(city.panel.high$is_chunjie)
+city.panel.high$year <- as.integer(substr(city.panel.high$buy_date, 1, 4))
+city.panel.high$month <- as.factor(city.panel.high$month)
+city.panel.high$month1 <- as.integer(substr(city.panel.high$buy_date, 6, 7))
+city.panel.high$cut_precp <- cut(city.panel.high$prec, breaks=c(-Inf, 0.1, 10, 25, 50, Inf))
+city.panel.high$cut_humid <- cut(city.panel.high$rhu, breaks=c(-Inf, 10, 20, 30, 40, 50, 60, 70, 80, 90, Inf))
+for (year in c(17, 18, 19, 23)){
+  city.panel.2019 <- city.panel.high[city.panel.high$year == 2000+year, ]
+  city.panel.2019 <- city.panel.2019 %>% filter(city.panel.2019$city_name %in% head(city_count$city_name, 101))
+  city.panel.2019 <- city.panel.2019[city.panel.2019$city_name != '香港特别行政区', ]
+  city.panel.2019 <- as.data.table(city.panel.2019)
+  
+  breaks <- c(-Inf, 0, 5, 10, 15, 20, 25, 30, 35, Inf)
+  city.panel.2019$cut_maxtemp <- cut(city.panel.2019$max_temp, breaks=breaks)
+  city.panel.2019$cut_maxtemp <- fct_relevel(city.panel.2019$cut_maxtemp, "(15,20]")
+  tmax.fe <- felm(log_cnt ~ cut_maxtemp + cut_precp  + cut_humid + wind_speed | city_name + buy_date | 0 | city_name + buy_date, data=city.panel.2019, exactDOF=TRUE, psdef=FALSE)
+  record_results(tmax.fe, paste0('city_', year, '_bin5_noon_cnt_highincome'))
+}
+# < 25y
+city.panel.midlow <- read.csv("daily_city_noon_age__25.csv", header = TRUE, row.names = NULL, encoding = 'gbk')
+city.panel.midlow$weekday <- as.factor(city.panel.midlow$weekday)
+city.panel.midlow$log_cnt <- log1p(city.panel.midlow$order_cnt)
+city.panel.midlow$log_avg_amt <- log1p(city.panel.midlow$total_amount / city.panel.midlow$order_cnt)
+city.panel.midlow$log_avg_delivery <- log1p(city.panel.midlow$total_delivery_fee / city.panel.midlow$order_cnt)
+city.panel.midlow$is_holiday <- as.factor(city.panel.midlow$is_holiday)
+city.panel.midlow$is_chunjie <- as.factor(city.panel.midlow$is_chunjie)
+city.panel.midlow$year <- as.integer(substr(city.panel.midlow$buy_date, 1, 4))
+city.panel.midlow$month <- as.factor(city.panel.midlow$month)
+city.panel.midlow$month1 <- as.integer(substr(city.panel.midlow$buy_date, 6, 7))
+city.panel.midlow$cut_precp <- cut(city.panel.midlow$prec, breaks=c(-Inf, 0.1, 10, 25, 50, Inf))
+city.panel.midlow$cut_humid <- cut(city.panel.midlow$rhu, breaks=c(-Inf, 10, 20, 30, 40, 50, 60, 70, 80, 90, Inf))
+for (year in c(17, 18, 19, 23)){
+  city.panel.2019 <- city.panel.midlow[city.panel.midlow$year == 2000+year, ]
+  city.panel.2019 <- city.panel.2019 %>% filter(city.panel.2019$city_name %in% head(city_count$city_name, 101))
+  city.panel.2019 <- city.panel.2019[city.panel.2019$city_name != '香港特别行政区', ]
+  city.panel.2019 <- as.data.table(city.panel.2019)
+  
+  breaks <- c(-Inf, 0, 5, 10, 15, 20, 25, 30, 35, Inf)
+  city.panel.2019$cut_maxtemp <- cut(city.panel.2019$max_temp, breaks=breaks)
+  city.panel.2019$cut_maxtemp <- fct_relevel(city.panel.2019$cut_maxtemp, "(15,20]")
+  tmax.fe <- felm(log_cnt ~ cut_maxtemp + cut_precp  + cut_humid + wind_speed | city_name + buy_date | 0 | city_name + buy_date, data=city.panel.2019, exactDOF=TRUE, psdef=FALSE)
+  record_results(tmax.fe, paste0('city_', year, '_bin5_noon_cnt_lowage'))
+}
+# 25~40 y
+city.panel.midlow <- read.csv("daily_city_noon_age_25~40.csv", header = TRUE, row.names = NULL, encoding = 'gbk')
+city.panel.midlow$weekday <- as.factor(city.panel.midlow$weekday)
+city.panel.midlow$log_cnt <- log1p(city.panel.midlow$order_cnt)
+city.panel.midlow$log_avg_amt <- log1p(city.panel.midlow$total_amount / city.panel.midlow$order_cnt)
+city.panel.midlow$log_avg_delivery <- log1p(city.panel.midlow$total_delivery_fee / city.panel.midlow$order_cnt)
+city.panel.midlow$is_holiday <- as.factor(city.panel.midlow$is_holiday)
+city.panel.midlow$is_chunjie <- as.factor(city.panel.midlow$is_chunjie)
+city.panel.midlow$year <- as.integer(substr(city.panel.midlow$buy_date, 1, 4))
+city.panel.midlow$month <- as.factor(city.panel.midlow$month)
+city.panel.midlow$month1 <- as.integer(substr(city.panel.midlow$buy_date, 6, 7))
+city.panel.midlow$cut_precp <- cut(city.panel.midlow$prec, breaks=c(-Inf, 0.1, 10, 25, 50, Inf))
+city.panel.midlow$cut_humid <- cut(city.panel.midlow$rhu, breaks=c(-Inf, 10, 20, 30, 40, 50, 60, 70, 80, 90, Inf))
+for (year in c(17, 18, 19, 23)){
+  city.panel.2019 <- city.panel.midlow[city.panel.midlow$year == 2000+year, ]
+  city.panel.2019 <- city.panel.2019 %>% filter(city.panel.2019$city_name %in% head(city_count$city_name, 101))
+  city.panel.2019 <- city.panel.2019[city.panel.2019$city_name != '香港特别行政区', ]
+  city.panel.2019 <- as.data.table(city.panel.2019)
+  
+  breaks <- c(-Inf, 0, 5, 10, 15, 20, 25, 30, 35, Inf)
+  city.panel.2019$cut_maxtemp <- cut(city.panel.2019$max_temp, breaks=breaks)
+  city.panel.2019$cut_maxtemp <- fct_relevel(city.panel.2019$cut_maxtemp, "(15,20]")
+  tmax.fe <- felm(log_cnt ~ cut_maxtemp + cut_precp  + cut_humid + wind_speed | city_name + buy_date | 0 | city_name + buy_date, data=city.panel.2019, exactDOF=TRUE, psdef=FALSE)
+  record_results(tmax.fe, paste0('city_', year, '_bin5_noon_cnt_midage'))
+}
+# >40y
+city.panel.high <- read.csv("daily_city_noon_age__40.csv", header = TRUE, row.names = NULL, encoding = 'gbk')
+city.panel.high$weekday <- as.factor(city.panel.high$weekday)
+city.panel.high$log_cnt <- log1p(city.panel.high$order_cnt)
+city.panel.high$log_avg_amt <- log1p(city.panel.high$total_amount / city.panel.high$order_cnt)
+city.panel.high$log_avg_delivery <- log1p(city.panel.high$total_delivery_fee / city.panel.high$order_cnt)
+city.panel.high$is_holiday <- as.factor(city.panel.high$is_holiday)
+city.panel.high$is_chunjie <- as.factor(city.panel.high$is_chunjie)
+city.panel.high$year <- as.integer(substr(city.panel.high$buy_date, 1, 4))
+city.panel.high$month <- as.factor(city.panel.high$month)
+city.panel.high$month1 <- as.integer(substr(city.panel.high$buy_date, 6, 7))
+city.panel.high$cut_precp <- cut(city.panel.high$prec, breaks=c(-Inf, 0.1, 10, 25, 50, Inf))
+city.panel.high$cut_humid <- cut(city.panel.high$rhu, breaks=c(-Inf, 10, 20, 30, 40, 50, 60, 70, 80, 90, Inf))
+for (year in c(17, 18, 19, 23)){
+  city.panel.2019 <- city.panel.high[city.panel.high$year == 2000+year, ]
+  city.panel.2019 <- city.panel.2019 %>% filter(city.panel.2019$city_name %in% head(city_count$city_name, 101))
+  city.panel.2019 <- city.panel.2019[city.panel.2019$city_name != '香港特别行政区', ]
+  city.panel.2019 <- as.data.table(city.panel.2019)
+  
+  breaks <- c(-Inf, 0, 5, 10, 15, 20, 25, 30, 35, Inf)
+  city.panel.2019$cut_maxtemp <- cut(city.panel.2019$max_temp, breaks=breaks)
+  city.panel.2019$cut_maxtemp <- fct_relevel(city.panel.2019$cut_maxtemp, "(15,20]")
+  tmax.fe <- felm(log_cnt ~ cut_maxtemp + cut_precp  + cut_humid + wind_speed | city_name + buy_date | 0 | city_name + buy_date, data=city.panel.2019, exactDOF=TRUE, psdef=FALSE)
+  summary(tmax.fe)
+  record_results(tmax.fe, paste0('city_', year, '_bin5_noon_cnt_highage'))
+}
+```
+
+## Figure. 4
+```{r}
+# Fig. 4a
+city.panel <- read.csv("G://外卖气候/processed/rider_info_city100.csv", header = TRUE, row.names = NULL)
+city.panel$weekday <- as.factor(city.panel$weekday)
+city.panel$year <- as.integer(substr(city.panel$dt, 1, 4))
+city.panel$month <- as.factor(city.panel$month)
+city.panel$cut_precp <- cut(city.panel$prec, breaks=c(-Inf, 0.1, 10, 25, 50, Inf))
+city.panel$cut_humid <- cut(city.panel$rhu, breaks=c(-Inf, 10, 20, 30, 40, 50, 60, 70, 80, 90, Inf))
+breaks <- c(-Inf,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40, Inf)
+city.panel$cut_maxtemp <- cut(city.panel$max_temp, breaks=breaks)
+city.panel$cut_maxtemp <- fct_relevel(city.panel$cut_maxtemp, "(19,20]")
+
+city.panel <- city.panel %>% filter(city.panel$city_name %in% head(city_count$city_name, 101))
+city.panel <- city.panel[city.panel$city_name != '香港特别行政区', ] # top 100 cities
+city.panel <- as.data.table(city.panel)
+tmax.fe <- felm(log_order ~ cut_maxtemp + cut_precp + cut_humid + wind_speed  | city_name + dt | 0 | city_name + dt
+                , data=city.panel, exactDOF=TRUE, psdef=FALSE)
+record_results(tmax.fe, 'city_rider_order_cnt')
+tmax.fe <- felm(log_order_noon ~ cut_maxtemp + cut_precp + cut_humid + wind_speed  | city_name + dt | 0 | city_name + dt
+                , data=city.panel, exactDOF=TRUE, psdef=FALSE)
+record_results(tmax.fe, 'city_rider_order_noon_cnt')
+tmax.fe <- felm(log_order_night ~ cut_maxtemp + cut_precp + cut_humid + wind_speed | city_name + dt | 0 | city_name + dt
+                , data=city.panel, exactDOF=TRUE, psdef=FALSE)
+record_results(tmax.fe, 'city_rider_order_evening_cnt')
+```
+
+## Figure. S8
+```{r}
+city_count <- read.csv("city_order_ranking.csv", header = TRUE, row.names = NULL, encoding = 'gbk')
+allmodels <- c('ACCESS.CM2', 'ACCESS.ESM1.5', 'CanESM5', 'HadGEM3.GC31.LL', 'MPI.ESM1.2.HR', 'MPI.ESM1.2.LR', 'NorESM2.LM', 'NorESM2.MM','UKESM1.0.LL')
+city.panel <- read.csv("daily_city_2017_2023.csv", header = TRUE, row.names = NULL, encoding = 'gbk')
+city.panel$weekday <- as.factor(city.panel$weekday)
+city.panel$is_holiday <- as.factor(city.panel$is_holiday)
+city.panel$is_chunjie <- as.factor(city.panel$is_chunjie)
+city.panel$year <- as.integer(substr(city.panel$buy_date, 1, 4))
+city.panel$month <- as.factor(city.panel$month)
+city.panel$month1 <- as.integer(substr(city.panel$buy_date, 6, 7))
+city.panel$cut_precp <- cut(city.panel$prec, breaks=c(-Inf, 0.1, 10, 25, 50, Inf))
+city.panel$cut_humid <- cut(city.panel$rhu, breaks=c(-Inf, 10, 20, 30, 40, 50, 60, 70, 80, 90, Inf))
+breaks <- c(-Inf,-10,-9,-8,-7,-6,-5,-4,-3,-2,-1,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40, Inf)
+city.panel$cut_maxtemp <- cut(city.panel$max_temp, breaks=breaks)
+city.panel$cut_maxtemp <- fct_relevel(city.panel$cut_maxtemp, "(19,20]")
+
+# fit a binned regression model
+city.panel.2019 <- city.panel[city.panel$year %in% c(2017,2018,2019,2023), ]
+city.panel.2019 <- city.panel.2019 %>% filter(city.panel.2019$city_name %in% head(city_count$city_name, 101))
+city.panel.2019 <- city.panel.2019[city.panel.2019$city_name != '香港特别行政区', ]
+city.panel.2019 <- as.data.table(city.panel.2019)
+model_feols <- feols(data = city.panel.2019, log_noon_cnt ~ cut_maxtemp + wind_speed | cut_precp + cut_humid + city_name + buy_date)
+
+for (target_year in 2020:2050){
+  # substitute with target year temperature
+  city.panel.2050 <- city.panel.predict[, .SD, .SDcols = c('city_name', 'buy_date', 'month', 'cut_precp', 'cut_humid', 'wind_speed', 'weekday', 'is_holiday', 'is_chunjie')]
+  city.panel.2050$dt <- gsub('2019', target_year, city.panel.2050$buy_date)
+  city.panel.2050$dt <- as.integer(gsub('-', '', city.panel.2050$dt))
+  maxtemp.2050 <- read.csv(paste0("maxtemp_",target_year,"_new.csv"), header = TRUE, row.names = NULL, fileEncoding = 'gbk')
+  hurs.2050 <- read.csv(paste0("hurs_",target_year,"_new.csv"), header = TRUE, row.names = NULL, fileEncoding = 'gbk')
+  pr.2050 <- read.csv(paste0("pr_",target_year,"_new.csv"), header = TRUE, row.names = NULL, fileEncoding = 'gbk')
+  wind.2050 <- read.csv(paste0("sfcWind_",target_year,"_new.csv"), header = TRUE, row.names = NULL, fileEncoding = 'gbk')
+  excluded_columns <- c("city_name", "dt", "month")
+  colnames_df <- colnames(wind.2050)
+  new_colnames <- sapply(colnames_df, function(col_name) {
+    if (col_name %in% excluded_columns) {
+      return(col_name)
+    } else {
+      return(paste0(col_name, "_wind"))
+    }
+  })
+  colnames(wind.2050) <- new_colnames
+  colnames_df <- colnames(pr.2050)
+  new_colnames <- sapply(colnames_df, function(col_name) {
+    if (col_name %in% excluded_columns) {
+      return(col_name)
+    } else {
+      return(paste0(col_name, "_pr"))
+    }
+  })
+  colnames(pr.2050) <- new_colnames
+  colnames_df <- colnames(hurs.2050)
+  new_colnames <- sapply(colnames_df, function(col_name) {
+    if (col_name %in% excluded_columns) {
+      return(col_name)
+    } else {
+      return(paste0(col_name, "_rhu"))
+    }
+  })
+  colnames(hurs.2050) <- new_colnames
+  
+  city.panel.2050 <- merge(city.panel.2050, maxtemp.2050[, !(names(maxtemp.2050) %in% "month")], by=c('city_name', 'dt'))
+  city.panel.2050 <- merge(city.panel.2050, wind.2050[, !(names(wind.2050) %in% "month")], by=c('city_name', 'dt'))
+  city.panel.2050 <- merge(city.panel.2050, pr.2050[, !(names(pr.2050) %in% "month")], by=c('city_name', 'dt'))
+  city.panel.2050 <- merge(city.panel.2050, hurs.2050[, !(names(hurs.2050) %in% "month")], by=c('city_name', 'dt'))
+  
+  for (i in c(allmodels, "model.avg")) {
+  city.panel.2050$cut_maxtemp <- cut(city.panel.2050[[i]]+city.panel.2050$calibration, breaks=breaks)
+  city.panel.2050$cut_maxtemp <- fct_relevel(city.panel.2050$cut_maxtemp, "(19,20]")
+  city.panel.2050$cut_precp <- cut(city.panel.2050[[paste0(i, '_pr')]]+city.panel.2050$calibration_pr, breaks=c(-Inf, 0.1, 10, 25, 50, Inf))
+  if (i != "ACCESS.ESM1.5") {
+   city.panel.2050$cut_humid <- cut(city.panel.2050[[paste0(i, '_rhu')]]+city.panel.2050$calibration_rhu, breaks=c(-Inf, 10, 20, 30, 40, 50, 60, 70, 80, 90, Inf))
+  }
+  city.panel.2050$wind_speed <- city.panel.2050[[paste0(i, '_wind')]]+city.panel.2050$calibration_wind
+    
+    ypred.2050 <- predict(model_feols, newdata = city.panel.2050[, .SD, .SDcols = c('cut_maxtemp', 'cut_precp', 'cut_humid', 'wind_speed', 'weekday', 'is_holiday', 'is_chunjie', 'city_name', 'buy_date')])
+    ypred.2050 <- exp(ypred.2050) - 1
+    city.panel.2050[[paste0('pred_', i)]] <- ypred.2050
+  }
+  
+  # save results
+  city.panel.2050$true_2019 <- ytrue
+  city.panel.2050$pred_2019 <- ypred.2019
+  selected_columns <- city.panel.2050[, colnames(city.panel.2050) %in% c("dt", "city_name", "true_2019") | grepl("pred", colnames(city.panel.2050))]
+  write.csv(as.data.frame(city.panel.2050)[, selected_columns], file = paste0('city_prediction_noon_',target_year,'.csv'), row.names = FALSE)
+}
+# these results are further processed to generate nationwide_projected_increase_2035.csv, nationwide_projected_increase_2050.csv, city_projected_increase_2050_summer.csv
+```
